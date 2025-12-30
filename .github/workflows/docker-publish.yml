@@ -3,6 +3,9 @@ name: Build and Publish Docker Image
 on:
   push:
     branches: [ main ]
+    tags: ['v*']
+  release:
+    types: [ published ]
 
 jobs:
   build-and-push:
@@ -30,7 +33,9 @@ jobs:
         with:
           context: .
           push: ${{ secrets.CR_PAT != '' }}
-          tags: ghcr.io/${{ github.repository_owner }}/gerador-de-cobranca:latest
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gerador-de-cobranca:latest
+            ghcr.io/${{ github.repository_owner }}/gerador-de-cobranca:${{ github.ref_name }}
 
       - name: Output image
-        run: echo "Built image ghcr.io/${{ github.repository_owner }}/gerador-de-cobranca:latest"
+        run: echo "Built image ghcr.io/${{ github.repository_owner }}/gerador-de-cobranca:latest and tag ${{ github.ref_name }}"
