@@ -18,6 +18,11 @@ async function init() {
       stripe_price_id TEXT,
       stripe_status TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS webhook_events (
+      event_id TEXT PRIMARY KEY,
+      created_at DATETIME DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -58,6 +63,15 @@ async function findUserByStripeSubscriptionId(subscriptionId) {
   return db.get('SELECT * FROM users WHERE stripe_subscription_id = ?', [subscriptionId]);
 }
 
+async function hasProcessedEvent(eventId) {
+  const row = await db.get('SELECT event_id FROM webhook_events WHERE event_id = ?', [eventId]);
+  return !!row;
+}
+
+async function markEventProcessed(eventId) {
+  return db.run('INSERT OR IGNORE INTO webhook_events (event_id) VALUES (?)', [eventId]);
+}
+
 module.exports = {
   init,
   createUser,
@@ -67,4 +81,6 @@ module.exports = {
   updateUserStripeDetailsById,
   updateUserStripeDetailsBySubscriptionId,
   findUserByStripeSubscriptionId,
+  hasProcessedEvent,
+  markEventProcessed,
 };
