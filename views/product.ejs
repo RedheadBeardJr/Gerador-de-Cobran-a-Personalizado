@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Produto</title>
+  </head>
+  <body>
+    <h1>Mochila de Couro Baltussen</h1>
+    <p>Preço: R$ 1.500,00</p>
+    <img src="/img/mochila.jpg" alt="Mochila" style="max-width:300px" />
+    <button id="buy">Comprar</button>
+    <a href="/">Voltar</a>
+
+    <script>
+      document.getElementById('buy').addEventListener('click', async () => {
+        const res = await fetch('/api/payment', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'Mochila de Couro Baltussen', unit_amount: 150000, quantity: 1, images: [] })
+        });
+        const data = await res.json();
+        if (data.url) window.location = data.url;
+        else alert('Erro ao iniciar pagamento');
+      });
+    </script>
+  </body>
+</html>

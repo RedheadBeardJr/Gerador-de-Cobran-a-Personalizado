@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Painel SaaS</title>
+  </head>
+  <body>
+    <h1>Bem-vindo ao Painel SaaS</h1>
+    <% if (user) { %>
+      <a href="/dashboard">Dashboard</a>
+      <form action="/logout" method="post" style="display:inline"><button type="submit">Sair</button></form>
+    <% } else { %>
+      <a href="/signup">Criar conta</a> | <a href="/login">Entrar</a>
+    <% } %>
+    <br>
+    <a href="/product">Ver produto de exemplo</a>
+  </body>
+</html>
