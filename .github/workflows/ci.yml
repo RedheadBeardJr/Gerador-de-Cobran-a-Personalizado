@@ -20,8 +20,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Type check
         run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+        env:
+          NODE_ENV: test
 
       - name: Build
         run: npm run build
@@ -32,4 +40,4 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Success
-        run: echo "Build and typecheck completed"
+        run: echo "Build, lint, typecheck and tests completed"

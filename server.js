@@ -259,7 +259,7 @@ app.post('/api/payment', async (req, res) => {
 
 app.get('/success', requireAuth, (req, res) => res.render('success'));
 
-app.post('/webhook', bodyParser.raw({type: 'application/json'}), (req, res) => {
+app.post('/webhook', bodyParser.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
   let event = null;
@@ -273,126 +273,136 @@ app.post('/webhook', bodyParser.raw({type: 'application/json'}), (req, res) => {
 
   const { sendWhatsApp } = require('./src/notifications');
 
-  (async () => {
-    try {
-      // checkout.session.completed
-      if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const subscriptionId = session.subscription;
-        let subscription = null;
-        if (subscriptionId) {
-          subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        }
+  try {
+    // Idempotency: skip events already processed
+    const eventId = event && event.id;
+    if (eventId) {
+      const already = await db.hasProcessedEvent(eventId);
+      if (already) {
+        console.log(`Skipping already processed event ${eventId}`);
+        return res.json({ received: true });
+      }
+      await db.markEventProcessed(eventId);
+    }
 
-        const userIdFromMetadata = session.metadata && session.metadata.userId;
-        if (userIdFromMetadata) {
-          await db.updateUserStripeDetailsById(userIdFromMetadata, {
+    // checkout.session.completed
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const subscriptionId = session.subscription;
+      let subscription = null;
+      if (subscriptionId) {
+        subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      }
+
+      const userIdFromMetadata = session.metadata && session.metadata.userId;
+      if (userIdFromMetadata) {
+        await db.updateUserStripeDetailsById(userIdFromMetadata, {
+          subscriptionId: subscription ? subscription.id : null,
+          customerId: session.customer,
+          priceId: subscription && subscription.items && subscription.items.data[0] ? subscription.items.data[0].price.id : null,
+          status: 'active',
+        });
+      } else if (session.customer_details && session.customer_details.email) {
+        const user = await db.findUserByEmail(session.customer_details.email);
+        if (user) {
+          await db.updateUserStripeDetailsById(user.id, {
             subscriptionId: subscription ? subscription.id : null,
             customerId: session.customer,
             priceId: subscription && subscription.items && subscription.items.data[0] ? subscription.items.data[0].price.id : null,
             status: 'active',
           });
-        } else if (session.customer_details && session.customer_details.email) {
-          const user = await db.findUserByEmail(session.customer_details.email);
-          if (user) {
-            await db.updateUserStripeDetailsById(user.id, {
-              subscriptionId: subscription ? subscription.id : null,
-              customerId: session.customer,
-              priceId: subscription && subscription.items && subscription.items.data[0] ? subscription.items.data[0].price.id : null,
-              status: 'active',
-            });
-          }
-        }
-
-        // Send notification (admin) about successful checkout
-        try {
-          let amount = session.amount_total;
-          if (!amount && session.payment_intent) {
-            const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
-            amount = pi.amount;
-          }
-          const amountBRL = amount ? (amount / 100).toFixed(2) : '—';
-          const email = session.customer_details && session.customer_details.email || session.customer_email || 'cliente';
-          const adminPhone = process.env.ADMIN_WHATSAPP || '';
-          const msg = `\u{1F4B0} Pagamento recebido: R$ ${amountBRL} \nCliente: ${email} \nTipo: ${subscriptionId ? 'assinatura' : 'pagamento único'}`;
-          if (adminPhone) await sendWhatsApp(adminPhone, msg);
-        } catch (err) {
-          console.error('Error sending checkout notification', err);
         }
       }
 
-      // invoice.payment_succeeded
-      if (event.type === 'invoice.payment_succeeded') {
-        const invoice = event.data.object;
-        const subscriptionId = invoice.subscription;
-        if (subscriptionId) {
-          // Retrieve subscription to read metadata
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          const maxInstallments = parseInt(subscription.metadata?.max_installments || '0', 10);
-          const paymentsMade = parseInt(subscription.metadata?.payments_made || '0', 10) + 1;
-
-          // update payments_made metadata
-          await stripe.subscriptions.update(subscriptionId, { metadata: { ...(subscription.metadata || {}), payments_made: String(paymentsMade) } });
-
-          // Notify admin/user via WhatsApp
-          try {
-            const adminPhone = process.env.ADMIN_WHATSAPP || '';
-            const customerEmail = invoice.customer_email || 'cliente';
-            const amountPaid = (invoice.amount_paid || invoice.total || 0) / 100;
-            const msg = `\u{1F4C8} Parcela paga: R$ ${amountPaid.toFixed(2)} \nCliente: ${customerEmail} \nAssinatura: ${subscriptionId} \nParcela: ${paymentsMade}/${maxInstallments || '∞'}`;
-            if (adminPhone) await sendWhatsApp(adminPhone, msg);
-          } catch (err) {
-            console.error('Error sending invoice success notification', err);
-          }
-
-          // If we've reached the max, cancel the subscription
-          if (maxInstallments > 0 && paymentsMade >= maxInstallments) {
-            try {
-              await stripe.subscriptions.del(subscriptionId);
-              await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'canceled' });
-            } catch (err) {
-              console.error('Error cancelling subscription after max installments', err);
-            }
-          } else {
-            // otherwise mark active
-            await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'active' });
-          }
+      // Send notification (admin) about successful checkout
+      try {
+        let amount = session.amount_total;
+        if (!amount && session.payment_intent) {
+          const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
+          amount = pi.amount;
         }
+        const amountBRL = amount ? (amount / 100).toFixed(2) : '—';
+        const email = session.customer_details && session.customer_details.email || session.customer_email || 'cliente';
+        const adminPhone = process.env.ADMIN_WHATSAPP || '';
+        const msg = `\u{1F4B0} Pagamento recebido: R$ ${amountBRL} \nCliente: ${email} \nTipo: ${subscriptionId ? 'assinatura' : 'pagamento único'}`;
+        if (adminPhone) await sendWhatsApp(adminPhone, msg);
+      } catch (err) {
+        console.error('Error sending checkout notification', err);
       }
+    }
 
-      // subscription cancelled
-      if (event.type === 'customer.subscription.deleted') {
-        const subscription = event.data.object;
-        if (subscription && subscription.id) {
-          await db.updateUserStripeDetailsBySubscriptionId(subscription.id, { status: 'canceled' });
-        }
-      }
+    // invoice.payment_succeeded
+    if (event.type === 'invoice.payment_succeeded') {
+      const invoice = event.data.object;
+      const subscriptionId = invoice.subscription;
+      if (subscriptionId) {
+        // Retrieve subscription to read metadata
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const maxInstallments = parseInt(subscription.metadata?.max_installments || '0', 10);
+        const paymentsMade = parseInt(subscription.metadata?.payments_made || '0', 10) + 1;
 
-      // invoice.payment_failed -> mark as past_due
-      if (event.type === 'invoice.payment_failed') {
-        const invoice = event.data.object;
-        const subscriptionId = invoice.subscription;
-        if (subscriptionId) {
-          await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'past_due' });
-        }
+        // update payments_made metadata
+        await stripe.subscriptions.update(subscriptionId, { metadata: { ...(subscription.metadata || {}), payments_made: String(paymentsMade) } });
 
-        // Notify admin about failed payment
+        // Notify admin/user via WhatsApp
         try {
           const adminPhone = process.env.ADMIN_WHATSAPP || '';
           const customerEmail = invoice.customer_email || 'cliente';
-          const amountDue = (invoice.amount_due || invoice.total || 0) / 100;
-          const msg = `\u{26A0} Pagamento falhou: R$ ${amountDue.toFixed(2)} \nCliente: ${customerEmail} \nAssinatura: ${subscriptionId || '—'}`;
+          const amountPaid = (invoice.amount_paid || invoice.total || 0) / 100;
+          const msg = `\u{1F4C8} Parcela paga: R$ ${amountPaid.toFixed(2)} \nCliente: ${customerEmail} \nAssinatura: ${subscriptionId} \nParcela: ${paymentsMade}/${maxInstallments || '∞'}`;
           if (adminPhone) await sendWhatsApp(adminPhone, msg);
         } catch (err) {
-          console.error('Error sending invoice failed notification', err);
+          console.error('Error sending invoice success notification', err);
+        }
+
+        // If we've reached the max, cancel the subscription
+        if (maxInstallments > 0 && paymentsMade >= maxInstallments) {
+          try {
+            await stripe.subscriptions.del(subscriptionId);
+            await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'canceled' });
+          } catch (err) {
+            console.error('Error cancelling subscription after max installments', err);
+          }
+        } else {
+          // otherwise mark active
+          await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'active' });
         }
       }
-    } catch (err) {
-      console.error('Error handling webhook event', err);
     }
-  })();
 
-  res.json({ received: true });
+    // subscription cancelled
+    if (event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object;
+      if (subscription && subscription.id) {
+        await db.updateUserStripeDetailsBySubscriptionId(subscription.id, { status: 'canceled' });
+      }
+    }
+
+    // invoice.payment_failed -> mark as past_due
+    if (event.type === 'invoice.payment_failed') {
+      const invoice = event.data.object;
+      const subscriptionId = invoice.subscription;
+      if (subscriptionId) {
+        await db.updateUserStripeDetailsBySubscriptionId(subscriptionId, { status: 'past_due' });
+      }
+
+      // Notify admin about failed payment
+      try {
+        const adminPhone = process.env.ADMIN_WHATSAPP || '';
+        const customerEmail = invoice.customer_email || 'cliente';
+        const amountDue = (invoice.amount_due || invoice.total || 0) / 100;
+        const msg = `\u{26A0} Pagamento falhou: R$ ${amountDue.toFixed(2)} \nCliente: ${customerEmail} \nAssinatura: ${subscriptionId || '—'}`;
+        if (adminPhone) await sendWhatsApp(adminPhone, msg);
+      } catch (err) {
+        console.error('Error sending invoice failed notification', err);
+      }
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('Error handling webhook event', err);
+    res.status(500).send('internal error');
+  }
 });
 
 // Mock checkout UI and helper endpoints (used when USE_STRIPE_MOCK=true)
@@ -423,8 +433,11 @@ app.post('/_mock-wa', bodyParser.json(), (req, res) => {
   res.json({ ok: true });
 });
 
+// Validate environment and init optional integrations
+require('./src/env')();
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await db.init();
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT} (env=${process.env.NODE_ENV || 'development'})`);
 });
