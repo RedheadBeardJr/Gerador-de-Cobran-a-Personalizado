@@ -15,7 +15,7 @@ module.exports = {
   customers: {
     async create(opts) {
       return { id: gen('mock_cus'), email: opts && opts.email };
-    }
+    },
   },
 
   checkout: {
@@ -33,30 +33,30 @@ module.exports = {
             id: subscriptionId,
             metadata: opts.subscription_data?.metadata || {},
             items: { data: [{ price: { id: opts.line_items?.[0]?.price || null } }] },
-            status: 'incomplete'
+            status: 'incomplete',
           });
           return { id, url, subscription: subscriptionId };
         }
 
         return { id, url };
-      }
-    }
+      },
+    },
   },
 
   prices: {
-    async create(opts) {
+    async create() {
       const id = gen('mock_price');
       return { id };
-    }
+    },
   },
 
   billingPortal: {
     sessions: {
-      async create(opts) {
-        const url = `${DOMAIN}/_mock/billing-portal?customer=${opts.customer}`;
+      async create(_opts) {
+        const url = `${DOMAIN}/_mock/billing-portal?customer=${_opts.customer}`;
         return { url };
-      }
-    }
+      },
+    },
   },
 
   subscriptions: {
@@ -72,12 +72,12 @@ module.exports = {
     async del(id) {
       subs.delete(id);
       return { id, deleted: true };
-    }
+    },
   },
 
   paymentIntents: {
     async retrieve(id) {
       return { id, amount: 1000 };
-    }
-  }
+    },
+  },
 };
