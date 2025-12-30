@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Billing</title>
+    <script>
+      async function goToCheckout() {
+        const res = await fetch('/create-checkout-session', { method: 'POST' });
+        const data = await res.json();
+        if (data.url) window.location = data.url;
+        else alert('Erro ao criar sessão');
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Faturamento</h1>
+    <p>Email: <%= user.email %></p>
+    <% if (user.stripe_customer_id) { %>
+      <p>Cliente Stripe: <%= user.stripe_customer_id %></p>
+    <% } %>
+    <button onclick="goToCheckout()">Assinar plano</button>
+    <button onclick="openPortal()" style="margin-left:12px">Abrir Portal do Cliente</button>
+    <a href="/dashboard">Voltar</a>
++    <script>
++      async function openPortal() {
++        const res = await fetch('/api/portal', { method: 'POST' });
++        const data = await res.json();
++        if (data.url) window.location = data.url;
++        else alert('Erro ao abrir portal');
++      }
++    </script>
+  </body>
+</html>

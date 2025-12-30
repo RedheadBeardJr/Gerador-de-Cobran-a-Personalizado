@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Gerador de Cobrança</title>
+  </head>
+  <body>
+    <div style="max-width:720px;margin:40px auto;padding:24px;border:1px solid #ddd;border-radius:8px">
+      <h1>Gerador de Cobrança Baltussen</h1>
+      <label>Produto: <input id="productName" value="Mochila Executive Couro" /></label><br>
+      <label>Valor (R$): <input id="amount" type="number" value="1500" /></label><br>
+
+      <div style="margin-top:12px">
+        <button id="card" style="background:#2563eb;color:#fff;padding:10px 16px;border-radius:6px;border:none">Gerar Link Cartão (até 10x)</button>
+        <button id="pix" style="background:#0d9488;color:#fff;padding:10px 16px;border-radius:6px;border:none;margin-left:8px">Gerar Link Pix (10x)</button>
+      </div>
+
+      <p style="margin-top:16px;color:#666">Use este formulário para gerar links de cobrança rápidos para clientes.</p>
+    </div>
+
+    <script>
+      async function criarCobranca(method) {
+        const productName = document.getElementById('productName').value;
+        const amount = Number(document.getElementById('amount').value);
+        const res = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ amount, productName, paymentMethod: method })
+        });
+        const data = await res.json();
+        if (data.url) window.location = data.url;
+        else alert('Erro ao gerar link');
+      }
+
+      document.getElementById('card').addEventListener('click', () => criarCobranca('card'));
+      document.getElementById('pix').addEventListener('click', () => criarCobranca('pix'));
+    </script>
+  </body>
+</html>
